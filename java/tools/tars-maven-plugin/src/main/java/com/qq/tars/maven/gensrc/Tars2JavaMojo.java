@@ -1,13 +1,13 @@
 /**
  * Tencent is pleased to support the open source community by making Tars available.
- *
+ * <p>
  * Copyright (C) 2016 THL A29 Limited, a Tencent company. All rights reserved.
- *
+ * <p>
  * Licensed under the BSD 3-Clause License (the "License"); you may not use this file except
  * in compliance with the License. You may obtain a copy of the License at
- *
+ * <p>
  * https://opensource.org/licenses/BSD-3-Clause
- *
+ * <p>
  * Unless required by applicable law or agreed to in writing, software distributed
  * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
  * CONDITIONS OF ANY KIND, either express or implied. See the License for the
@@ -15,16 +15,10 @@
  */
 package com.qq.tars.maven.gensrc;
 
-import java.io.File;
-import java.io.PrintWriter;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Map.Entry;
-import java.util.concurrent.atomic.AtomicInteger;
-
+import com.qq.tars.maven.parse.TarsLexer;
+import com.qq.tars.maven.parse.TarsParser;
+import com.qq.tars.maven.parse.ast.*;
+import com.qq.tars.maven.parse.ast.TarsPrimitiveType.PrimitiveType;
 import org.antlr.runtime.ANTLRFileStream;
 import org.antlr.runtime.CommonTokenStream;
 import org.antlr.runtime.Token;
@@ -35,24 +29,11 @@ import org.apache.maven.plugin.MojoFailureException;
 import org.apache.maven.plugins.annotations.Mojo;
 import org.apache.maven.plugins.annotations.Parameter;
 
-import com.qq.tars.maven.parse.TarsLexer;
-import com.qq.tars.maven.parse.TarsParser;
-import com.qq.tars.maven.parse.ast.TarsConst;
-import com.qq.tars.maven.parse.ast.TarsCustomType;
-import com.qq.tars.maven.parse.ast.TarsEnum;
-import com.qq.tars.maven.parse.ast.TarsInterface;
-import com.qq.tars.maven.parse.ast.TarsKey;
-import com.qq.tars.maven.parse.ast.TarsMapType;
-import com.qq.tars.maven.parse.ast.TarsNamespace;
-import com.qq.tars.maven.parse.ast.TarsOperation;
-import com.qq.tars.maven.parse.ast.TarsParam;
-import com.qq.tars.maven.parse.ast.TarsPrimitiveType;
-import com.qq.tars.maven.parse.ast.TarsPrimitiveType.PrimitiveType;
-import com.qq.tars.maven.parse.ast.TarsRoot;
-import com.qq.tars.maven.parse.ast.TarsStruct;
-import com.qq.tars.maven.parse.ast.TarsStructMember;
-import com.qq.tars.maven.parse.ast.TarsType;
-import com.qq.tars.maven.parse.ast.TarsVectorType;
+import java.io.File;
+import java.io.PrintWriter;
+import java.util.*;
+import java.util.Map.Entry;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Mojo(name = "tars2java", threadSafe = true)
 public class Tars2JavaMojo extends AbstractMojo {
@@ -76,7 +57,8 @@ public class Tars2JavaMojo extends AbstractMojo {
         Map<String, List<TarsNamespace>> nsMap = new HashMap<String, List<TarsNamespace>>();
 
         // 2. parse tars files
-        for (String tarsFile : tars2JavaConfig.tarsFiles) {
+        List<String> tarsFiles = getTarsFiles(tars2JavaConfig.tarsFiles);
+        for (String tarsFile : tarsFiles) {
             try {
                 getLog().info("Parse " + tarsFile + " ...");
                 TarsLexer tarsLexer = new TarsLexer(new ANTLRFileStream(tarsFile, tars2JavaConfig.tarsFileCharset));
@@ -106,6 +88,34 @@ public class Tars2JavaMojo extends AbstractMojo {
                 getLog().error("generate code for namespace : " + entry.getKey() + " Error!", th);
             }
         }
+    }
+
+    private List<String> getTarsFiles(String[] tarsFiles) {
+        List<File> files = new ArrayList<File>();
+        for (String tarsFile : tarsFiles) {
+            files.addAll(listAllFiles(tarsFile));
+        }
+        List<String> fileList = new ArrayList<String>(files.size());
+        for (File file : files) {
+            fileList.add(file.getAbsolutePath());
+        }
+        return fileList;
+    }
+
+    public List<File> listAllFiles(String dirPath) {
+        File directory = new File(dirPath);
+        List<File> files = new ArrayList<File>();
+        if (directory.isFile()) {
+            files.add(directory);
+            return files;
+        } else if (directory.isDirectory()) {
+            File[] fileArr = directory.listFiles();
+            for (int i = 0; i < fileArr.length; i++) {
+                File fileOne = fileArr[i];
+                files.addAll(listAllFiles(fileOne.getPath()));
+            }
+        }
+        return files;
     }
 
     private String getDoc(CommonTree ast, String prefix) {
@@ -151,12 +161,12 @@ public class Tars2JavaMojo extends AbstractMojo {
         // generate interface Prx
         for (TarsNamespace ns : namespaces) {
             for (TarsInterface tarsInterface : ns.interfaceList()) {
-                if (tars2JavaConfig.servant) {
+//                if (tars2JavaConfig.servant) {
                     genServant(dirPath, packageName, ns.namespace(), tarsInterface, nsMap);
-                } else {
+//                } else {
                     genPrx(dirPath, packageName, ns.namespace(), tarsInterface, nsMap);
                     genPrxCallback(dirPath, packageName, ns.namespace(), tarsInterface, nsMap);
-                }
+//                }
             }
         }
         getLog().info("module " + nsName + " <<");
@@ -302,6 +312,22 @@ public class Tars2JavaMojo extends AbstractMojo {
         for (TarsStructMember m : struct.memberList()) {
             out.println("\t\tthis." + m.memberName() + " = " + m.memberName() + ";");
         }
+        out.println("\t}");
+        out.println();
+
+        // toString
+        out.println("\t@Override");
+        out.println("\tpublic String toString() {");
+        out.println("\t\treturn \"" + struct.structName() + "{\" +");
+        for (int i = 0; i < struct.memberList().size(); i++) {
+            TarsStructMember m = struct.memberList().get(i);
+            if (i == 0) {
+                out.println("\t\t\t\t\"" + m.memberName() + "=\" + " + m.memberName() + " +");
+            } else {
+                out.println("\t\t\t\t\", " + m.memberName() + "=\" + " + m.memberName() + " +");
+            }
+        }
+        out.println("\t\t\t\t\"}\";");
         out.println("\t}");
         out.println();
 
@@ -871,7 +897,7 @@ public class Tars2JavaMojo extends AbstractMojo {
     }
 
     public static String fieldGetter(String fieldName, TarsType type) {
-        if (type.isPrimitive() && (type.asPrimitive()).primitiveType() == TarsPrimitiveType.PrimitiveType.BOOL && fieldName.startsWith("is")) {
+        if (type.isPrimitive() && (type.asPrimitive()).primitiveType() == PrimitiveType.BOOL && fieldName.startsWith("is")) {
             return fieldName;
         } else {
             return "get" + firstUpStr(fieldName);
@@ -879,7 +905,7 @@ public class Tars2JavaMojo extends AbstractMojo {
     }
 
     public static String fieldSetter(String fieldName, TarsType type) {
-        if (type.isPrimitive() && (type.asPrimitive()).primitiveType() == TarsPrimitiveType.PrimitiveType.BOOL && fieldName.startsWith("is")) {
+        if (type.isPrimitive() && (type.asPrimitive()).primitiveType() == PrimitiveType.BOOL && fieldName.startsWith("is")) {
             return "set" + fieldName.substring(2);
         } else {
             return "set" + firstUpStr(fieldName);
