@@ -1,18 +1,23 @@
 package com.qq.tars.web.controller.auto;
 
 
+import com.qq.tars.db.ConfigMapper;
 import com.qq.tars.db.ServerMapper;
+import com.qq.tars.entity.ConfigFile;
 import com.qq.tars.entity.ServerConf;
 import com.qq.tars.entity.ServerPatch;
 import com.qq.tars.service.PatchService;
 import com.qq.tars.service.SystemConfigService;
+import com.qq.tars.service.admin.CommandResult;
 import com.qq.tars.service.task.AddTask;
 import com.qq.tars.service.task.AddTaskItem;
 import com.qq.tars.service.task.TaskResp;
 import com.qq.tars.web.controller.TaskController;
 import com.qq.tars.web.controller.auto.dto.AddDeployTaskReq;
 import com.qq.tars.web.controller.auto.dto.AutoPatchReq;
+import com.qq.tars.web.controller.auto.dto.PushConfigReq;
 import com.qq.tars.web.controller.auto.dto.ResultDTO;
+import com.qq.tars.web.controller.config.ConfigController;
 import org.apache.ibatis.session.RowBounds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -39,6 +44,9 @@ public class AutoController {
     private static final String WAR_SUFFIX = ".war";
     @Autowired
     TaskController taskController;
+
+    @Autowired
+    ConfigController configController;
     @Autowired
     private SystemConfigService systemConfigService;
 
@@ -47,6 +55,9 @@ public class AutoController {
 
     @Autowired
     private ServerMapper serverMapper;
+
+    @Autowired
+    private ConfigMapper configMapper;
 
 
     @RequestMapping(value = "auto/add_deploy_task")
@@ -116,6 +127,37 @@ public class AutoController {
             return addDeployTask(addDeployTaskReq);
         }
         return addPatchResult;
+    }
+
+    @RequestMapping(value = "auto/push_config")
+    @ResponseBody
+    public ResultDTO pushConfig(PushConfigReq req) {
+        try {
+            List<ConfigFile> configList = configMapper.getServerConfigFile(req.getApplication(), req.getModuleName(), null, null, null);
+            ConfigFile configFile = configList.stream().filter(o -> req.getFileName().equals(o.getFilename())).findFirst().get();
+            List<CommandResult> pushResult = configController.pushConfigFile(String.valueOf(configFile.getId()));
+            List<ServerConf> servers = serverMapper.getServerConf(req.getApplication(), req.getModuleName(),
+                    false, null, null, null,
+                    new RowBounds(0, 0));
+
+            AddTaskItem item = new AddTaskItem();
+            item.setCommand("restart");
+            item.setServerId(servers.get(0).getId());
+            AddTask addTask = new AddTask();
+            addTask.setSerial(true);
+            addTask.setItems(Arrays.asList(item));
+
+            TaskResp taskResp = taskController.addTask(addTask);
+            logger.info("execute pushConfig with req={}, pushResult={}, taskResp={}", req, pushResult, taskResp);
+            return new ResultDTO();
+        } catch (Exception e) {
+            e.printStackTrace();
+            logger.error("execute pushConfig occur an error with req={}", req, e);
+            ResultDTO resultDTO = new ResultDTO();
+            resultDTO.setResultCode(SYS_ERROR);
+            resultDTO.setErrMsg(req.toString() + "\\r\\n\\t" + getStackTrace(e));
+            return resultDTO;
+        }
     }
 
     private String getStackTrace(Throwable throwable) {
