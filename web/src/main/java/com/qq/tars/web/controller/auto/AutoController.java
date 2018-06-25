@@ -1,6 +1,8 @@
 package com.qq.tars.web.controller.auto;
 
 
+import com.qq.tars.db.ServerMapper;
+import com.qq.tars.entity.ServerConf;
 import com.qq.tars.entity.ServerPatch;
 import com.qq.tars.service.PatchService;
 import com.qq.tars.service.SystemConfigService;
@@ -11,6 +13,7 @@ import com.qq.tars.web.controller.TaskController;
 import com.qq.tars.web.controller.auto.dto.AddDeployTaskReq;
 import com.qq.tars.web.controller.auto.dto.AutoPatchReq;
 import com.qq.tars.web.controller.auto.dto.ResultDTO;
+import org.apache.ibatis.session.RowBounds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -18,8 +21,11 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseBody;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -38,6 +44,9 @@ public class AutoController {
 
     @Autowired
     private PatchService patchService;
+
+    @Autowired
+    private ServerMapper serverMapper;
 
 
     @RequestMapping(value = "auto/add_deploy_task")
@@ -66,7 +75,7 @@ public class AutoController {
             logger.error("execute addDeployTaskReq occur an error with addDeployTaskReq={}", addDeployTaskReq, e);
             ResultDTO resultDTO = new ResultDTO();
             resultDTO.setResultCode(SYS_ERROR);
-            resultDTO.setErrMsg(addDeployTaskReq.toString() + "     " + Arrays.toString(e.getStackTrace()));
+            resultDTO.setErrMsg(addDeployTaskReq.toString() + "\\r\\n\\t" + getStackTrace(e));
             return resultDTO;
         }
     }
@@ -87,8 +96,32 @@ public class AutoController {
             logger.error("execute autoPatch occur an error with addDeployTaskReq={}", autoPatchReq, e);
             ResultDTO resultDTO = new ResultDTO();
             resultDTO.setResultCode(SYS_ERROR);
-            resultDTO.setErrMsg(autoPatchReq.toString() + "     " + Arrays.toString(e.getStackTrace()));
+            resultDTO.setErrMsg(autoPatchReq.toString() + "\\r\\n\\t" + getStackTrace(e));
             return resultDTO;
         }
+    }
+
+    @RequestMapping(value = "auto/deploy")
+    @ResponseBody
+    public ResultDTO autoDeploy(AutoPatchReq autoPatchReq) {
+        ResultDTO addPatchResult = autoPatch(autoPatchReq);
+        if (addPatchResult.isSuccess()) {
+            AddDeployTaskReq addDeployTaskReq = new AddDeployTaskReq();
+            addDeployTaskReq.setPatchId((long) addPatchResult.getData());
+            addDeployTaskReq.setComment(autoPatchReq.getComment());
+            List<ServerConf> servers = serverMapper.getServerConf(autoPatchReq.getApplication(), autoPatchReq.getModuleName(),
+                    false, null, null, null,
+                    new RowBounds(0, 0));
+            addDeployTaskReq.setServerId(servers.get(0).getId());
+            return addDeployTask(addDeployTaskReq);
+        }
+        return addPatchResult;
+    }
+
+    private String getStackTrace(Throwable throwable) {
+        StringWriter sw = new StringWriter();
+        PrintWriter pw = new PrintWriter(sw, true);
+        throwable.printStackTrace(pw);
+        return sw.getBuffer().toString();
     }
 }

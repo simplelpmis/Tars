@@ -6,8 +6,8 @@ package com.qq.tars.web.controller.auto.dto;
  * @Description: 添加发布任务
  */
 public class AddDeployTaskReq {
-    private int serverId;
-    private int patchId;
+    private long serverId;
+    private long patchId;
     private String comment;
 
     @Override
@@ -20,19 +20,19 @@ public class AddDeployTaskReq {
         return sb.toString();
     }
 
-    public int getServerId() {
+    public long getServerId() {
         return serverId;
     }
 
-    public void setServerId(int serverId) {
+    public void setServerId(long serverId) {
         this.serverId = serverId;
     }
 
-    public int getPatchId() {
+    public long getPatchId() {
         return patchId;
     }
 
-    public void setPatchId(int patchId) {
+    public void setPatchId(long patchId) {
         this.patchId = patchId;
     }
 
