@@ -27,6 +27,10 @@ public class ResultDTO<T> {
         return sb.toString();
     }
 
+    public boolean isSuccess() {
+        return resultCode == 0;
+    }
+
     public int getResultCode() {
         return resultCode;
     }

@@ -13,11 +13,9 @@ import com.qq.tars.service.task.AddTask;
 import com.qq.tars.service.task.AddTaskItem;
 import com.qq.tars.service.task.TaskResp;
 import com.qq.tars.web.controller.TaskController;
-import com.qq.tars.web.controller.auto.dto.AddDeployTaskReq;
-import com.qq.tars.web.controller.auto.dto.AutoPatchReq;
-import com.qq.tars.web.controller.auto.dto.PushConfigReq;
-import com.qq.tars.web.controller.auto.dto.ResultDTO;
+import com.qq.tars.web.controller.auto.dto.*;
 import com.qq.tars.web.controller.config.ConfigController;
+import org.apache.commons.lang3.StringUtils;
 import org.apache.ibatis.session.RowBounds;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -28,10 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 import java.io.PrintWriter;
 import java.io.StringWriter;
-import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.stream.Collectors;
 
 /**
  * @Date 2018/5/23      @Author Simba
@@ -42,11 +38,13 @@ public class AutoController {
     private static final Logger logger = LoggerFactory.getLogger(AutoController.class);
     private static final int SYS_ERROR = 1;
     private static final String WAR_SUFFIX = ".war";
+
     @Autowired
     TaskController taskController;
 
     @Autowired
     ConfigController configController;
+
     @Autowired
     private SystemConfigService systemConfigService;
 
@@ -133,9 +131,22 @@ public class AutoController {
     @ResponseBody
     public ResultDTO pushConfig(PushConfigReq req) {
         try {
-            List<ConfigFile> configList = configMapper.getServerConfigFile(req.getApplication(), req.getModuleName(), null, null, null);
-            ConfigFile configFile = configList.stream().filter(o -> req.getFileName().equals(o.getFilename())).findFirst().get();
-            List<CommandResult> pushResult = configController.pushConfigFile(String.valueOf(configFile.getId()));
+            List<ConfigFile> configList = configMapper.listServerConfigFile(req.getApplication(), req.getModuleName());
+            List<String> list = configList.stream().map(o -> o.getId().toString()).collect(Collectors.toList());
+            List<List<CommandResult>> pushResultList = new ArrayList<>();
+            for (String id : list) {
+                List<CommandResult> pushResult = configController.pushConfigFile(id);
+                if (pushResult.get(0).getRet() != 0) {
+                    ResultDTO resultDTO = new ResultDTO();
+                    resultDTO.setResultCode(SYS_ERROR);
+                    resultDTO.setErrMsg("push config fail: id=" + id + ", " + "errMsg=" + pushResult.get(0).getErrMsg());
+                    logger.warn("fail execute pushConfig with req={}, pushResult={}, id={}, msg={}",
+                            req, pushResult.get(0), id, pushResult.get(0).getErrMsg());
+                    return resultDTO;
+                }
+                pushResultList.add(pushResult);
+            }
+
             List<ServerConf> servers = serverMapper.getServerConf(req.getApplication(), req.getModuleName(),
                     false, null, null, null,
                     new RowBounds(0, 0));
@@ -148,11 +159,38 @@ public class AutoController {
             addTask.setItems(Arrays.asList(item));
 
             TaskResp taskResp = taskController.addTask(addTask);
-            logger.info("execute pushConfig with req={}, pushResult={}, taskResp={}", req, pushResult, taskResp);
+            logger.info("execute pushConfig with req={}, pushResultList={}, taskResp={}", req, pushResultList, taskResp);
             return new ResultDTO();
         } catch (Exception e) {
             e.printStackTrace();
             logger.error("execute pushConfig occur an error with req={}", req, e);
+            ResultDTO resultDTO = new ResultDTO();
+            resultDTO.setResultCode(SYS_ERROR);
+            resultDTO.setErrMsg(req.toString() + "\\r\\n\\t" + getStackTrace(e));
+            return resultDTO;
+        }
+    }
+
+    @RequestMapping(value = "auto/restart")
+    @ResponseBody
+    public ResultDTO restartServer(RestartReq req) {
+        try {
+            List<ServerConf> servers = serverMapper.getServerConf(req.getApplication(), req.getModuleName(),
+                    false, null, null, null,
+                    new RowBounds(0, 0));
+            AddTaskItem item = new AddTaskItem();
+            item.setCommand("restart");
+            item.setServerId(servers.get(0).getId());
+            AddTask addTask = new AddTask();
+            addTask.setSerial(true);
+            addTask.setItems(Arrays.asList(item));
+
+            TaskResp taskResp = taskController.addTask(addTask);
+            logger.info("execute restartServer with req={},  taskResp={}", req, taskResp);
+            return new ResultDTO();
+        } catch (Exception e) {
+            e.printStackTrace();
+            logger.error("execute restartServer occur an error with req={}", req, e);
             ResultDTO resultDTO = new ResultDTO();
             resultDTO.setResultCode(SYS_ERROR);
             resultDTO.setErrMsg(req.toString() + "\\r\\n\\t" + getStackTrace(e));
